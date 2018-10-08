@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"log"
@@ -11,7 +11,7 @@ func TestFileStreamAdapter(t *testing.T) {
 	output := make(chan interface{})
 
 	fileStreamAdapter := &FileStreamAdapter{
-		FilePath: "./test/data/userid1/timestamp/GEYDAMBQGA======-GEYDAMBQGA======",
+		FilePath: "./test/data/userid1/timestamp/GEYDAMBQGA======-GEYDAMBQGA======-22MRRBB6WNL63Q4JX6Y7BN3MDEIY7EH3",
 		Codec:    GetCodecFixture(),
 		Output:   output,
 	}

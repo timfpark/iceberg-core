@@ -1,6 +1,7 @@
-package main
+package core
 
 import (
+	"crypto/sha1"
 	"encoding/base32"
 	"errors"
 	"fmt"
@@ -90,8 +91,9 @@ func (b *Block) Length() int {
 	return len(b.Rows)
 }
 
-func (b *Block) GetRowsAsBinary() (blockBinary []byte) {
+func (b *Block) GetHashForRows() (blockBinary []byte) {
 	blockBinary = []byte{}
+	h := sha1.New()
 	for _, row := range b.Rows {
 		fmt.Printf("%+v\n", row)
 		rowBinary, err := b.Codec.BinaryFromNative(nil, row)
@@ -99,17 +101,18 @@ func (b *Block) GetRowsAsBinary() (blockBinary []byte) {
 			fmt.Printf("GetRowsAsBinary: %s\n", err)
 		}
 
-		blockBinary = append(blockBinary, rowBinary...)
+		h.Write(rowBinary)
 	}
 
-	return blockBinary
+	return h.Sum(nil)
 }
 
 func (b *Block) GetFilename() string {
+	rowHash := b.GetHashForRows()
 	startingKeyAsBase32 := b.GetStartingKeyAsBase32()
 	endingKeyAsBase32 := b.GetEndingKeyAsBase32()
 
-	return fmt.Sprintf("%s-%s", startingKeyAsBase32, endingKeyAsBase32)
+	return fmt.Sprintf("%s-%s-%s", startingKeyAsBase32, endingKeyAsBase32, base32.StdEncoding.EncodeToString(rowHash))
 }
 
 func (b *Block) RowsForKeyRange(startKey interface{}, endKey interface{}) (rowsInRange []interface{}) {
@@ -139,18 +142,21 @@ func (b *Block) RowsForKeyRange(startKey interface{}, endKey interface{}) (rowsI
 }
 
 func filenameIntersectsKeyRange(blockFilename string, startKey interface{}, endKey interface{}) (intersects bool) {
+	const kStartKeyIndex = 0
+	const kEndKeyIndex = 1
+
 	parts := strings.Split(blockFilename, "-")
 
-	if len(parts) != 2 {
+	if len(parts) != 3 {
 		return false
 	}
 
-	blockStartKeyData, err := base32.StdEncoding.DecodeString(parts[0])
+	blockStartKeyData, err := base32.StdEncoding.DecodeString(parts[kStartKeyIndex])
 	if err != nil {
 		return false
 	}
 
-	blockEndKeyData, err := base32.StdEncoding.DecodeString(parts[1])
+	blockEndKeyData, err := base32.StdEncoding.DecodeString(parts[kEndKeyIndex])
 	if err != nil {
 		return false
 	}

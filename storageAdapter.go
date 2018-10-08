@@ -1,4 +1,4 @@
-package main
+package core
 
 type StorageAdapter interface {
 	Query(partition interface{}, startKey interface{}, endKey interface{}) []interface{}
