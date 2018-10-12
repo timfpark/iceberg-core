@@ -1,13 +1,13 @@
 package core
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-storage-blob-go/2016-05-31/azblob"
@@ -34,11 +34,10 @@ type AzureStorageAdapter struct {
 func (asa *AzureStorageAdapter) uploadBlock(block *Block) (err error) {
 	log.Printf("Uploading block PartitionKey: %s StartingKey: %d EndingKey: %d with %d rows\n", block.PartitionKey, block.StartingKey, block.EndingKey, len(block.Rows))
 
-	var avroBuffer bytes.Buffer
-	bufferWriter := bufio.NewWriter(&avroBuffer)
+	avroBuffer := new(bytes.Buffer)
 
 	ocfWriter, err := goavro.NewOCFWriter(goavro.OCFConfig{
-		W:               bufferWriter,
+		W:               avroBuffer,
 		CompressionName: asa.CompressionName,
 		Schema:          asa.Codec.Schema(),
 	})
@@ -55,7 +54,9 @@ func (asa *AzureStorageAdapter) uploadBlock(block *Block) (err error) {
 	blobFilePath := fmt.Sprintf("%s/%s", blobPath, block.GetFilename())
 	blobURL := asa.containerURL.NewBlockBlobURL(blobFilePath)
 
-	_, err = azblob.UploadBufferToBlockBlob(asa.context, avroBuffer.Bytes(), blobURL, azblob.UploadToBlockBlobOptions{
+	avroBytes := avroBuffer.Bytes()
+
+	_, err = azblob.UploadBufferToBlockBlob(asa.context, avroBytes, blobURL, azblob.UploadToBlockBlobOptions{
 		BlockSize:   4 * 1024 * 1024,
 		Parallelism: 16})
 
@@ -85,6 +86,89 @@ func (asa *AzureStorageAdapter) processBlocks() {
 			}
 		}
 	}()
+}
+
+func (asa *AzureStorageAdapter) Load(partitionKey string, blockFilename string, blocks chan *Block, errors chan error) {
+	blobPath := asa.buildBlobPath(partitionKey, asa.KeyColumn)
+	blobFilePath := fmt.Sprintf("%s/%s", blobPath, blockFilename)
+	blobURL := asa.containerURL.NewBlockBlobURL(blobFilePath)
+
+	stream := azblob.NewDownloadStream(asa.context, blobURL.GetBlob, azblob.DownloadStreamOptions{})
+
+	block := &Block{
+		Codec:        asa.Codec,
+		Rows:         []interface{}{},
+		PartitionKey: partitionKey,
+		KeyColumn:    asa.KeyColumn,
+	}
+
+	rows := make(chan interface{})
+	ReadOCFIntoChannel(stream, rows, errors)
+
+	for {
+		row, more := <-rows
+		if !more {
+			break
+		}
+		block.Write(row)
+	}
+
+	blocks <- block
+}
+
+func (asa *AzureStorageAdapter) GetPartitionFileNames(partitionKey string) (partitionFileNames []string, err error) {
+	partitionFileNames = []string{}
+	partitionPath := asa.buildBlobPath(partitionKey, asa.KeyColumn)
+
+	for marker := (azblob.Marker{}); marker.NotDone(); {
+		// Get a result segment starting with the blob indicated by the current Marker.
+		listBlob, err := asa.containerURL.ListBlobs(asa.context, marker, azblob.ListBlobsOptions{
+			Prefix: partitionPath,
+		})
+
+		if err != nil {
+			return nil, err
+		}
+
+		// ListBlobs returns the start of the next segment; you MUST use this to get
+		// the next segment (after processing the current result segment).
+		marker = listBlob.NextMarker
+
+		// Process the blobs returned in this result segment (if the segment is empty, the loop body won't execute)
+		for _, blobInfo := range listBlob.Blobs.Blob {
+			nameParts := strings.Split(blobInfo.Name, "/")
+			if len(nameParts) == 3 {
+				partitionFileNames = append(partitionFileNames, nameParts[2])
+			}
+		}
+	}
+
+	return partitionFileNames, nil
+}
+
+func (asa *AzureStorageAdapter) Query(partitionKey string, startKey interface{}, endKey interface{}) (results []interface{}, err error) {
+	partitionFileNames, err := asa.GetPartitionFileNames(partitionKey)
+	intersectingPartitionFilenames := IntersectingBlockFilenames(partitionFileNames, startKey, endKey)
+
+	blocks := make(chan *Block)
+	errors := make(chan error)
+
+	results = make([]interface{}, 0)
+	for _, intersectingPartitionFilename := range intersectingPartitionFilenames {
+		go asa.Load(partitionKey, intersectingPartitionFilename, blocks, errors)
+	}
+
+	for i := 0; i < len(intersectingPartitionFilenames); i++ {
+		select {
+		case block := <-blocks:
+			filteredRows := block.RowsForKeyRange(startKey, endKey)
+			results = append(results, filteredRows)
+		case err = <-errors:
+			return results, err
+		}
+	}
+
+	return
 }
 
 func (asa *AzureStorageAdapter) Start() (err error) {
