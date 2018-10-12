@@ -27,6 +27,39 @@ func (fsa *FilesystemStorageAdapter) getPartitionKeyPath(partitionKey string, ke
 	return fmt.Sprintf("%s/%s/%s", fsa.BasePath, partitionKey, keyColumn)
 }
 
+func (fsa *FilesystemStorageAdapter) writeBlockFile(block *Block) (err error) {
+	log.Printf("Writing block PartitionKey: %s StartingKey: %d EndingKey: %d with %d rows\n", block.PartitionKey, block.StartingKey, block.EndingKey, len(block.Rows))
+
+	partitionPath := fsa.getPartitionKeyPath(block.PartitionKey, block.KeyColumn)
+	blockFilename := block.GetFilename()
+	blockFilePath := fmt.Sprintf("%s/%s", partitionPath, blockFilename)
+
+	os.MkdirAll(partitionPath, os.ModePerm)
+
+	toFile, err := os.Create(blockFilePath)
+	if err != nil {
+		return err
+	}
+
+	defer func(ioc io.Closer) {
+		if err := ioc.Close(); err != nil {
+			log.Printf("closing file failed with %s", err)
+		}
+	}(toFile)
+
+	ocfWriter, err := goavro.NewOCFWriter(goavro.OCFConfig{
+		W:               toFile,
+		CompressionName: fsa.CompressionName,
+		Schema:          fsa.Codec.Schema(),
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return ocfWriter.Append(block.Rows)
+}
+
 func (fsa *FilesystemStorageAdapter) processBlocks() {
 	go func() {
 		for {
@@ -37,34 +70,12 @@ func (fsa *FilesystemStorageAdapter) processBlocks() {
 				break
 			}
 
-			log.Printf("Writing block PartitionKey: %s StartingKey: %d EndingKey: %d with %d rows\n", block.PartitionKey, block.StartingKey, block.EndingKey, len(block.Rows))
+			if err := fsa.writeBlockFile(block); err != nil {
+				log.Printf("Writing block PartitionKey: %s StartingKey: %d EndingKey: %d failed with %s. Retrying write.\n", block.PartitionKey, block.StartingKey, block.EndingKey, err)
 
-			partitionPath := fsa.getPartitionKeyPath(block.PartitionKey, block.KeyColumn)
-			blockFilename := block.GetFilename()
-			blockFilePath := fmt.Sprintf("%s/%s", partitionPath, blockFilename)
-
-			os.MkdirAll(partitionPath, os.ModePerm)
-
-			toFile, err := os.Create(blockFilePath)
-			if err != nil {
-				log.Printf("creating file failed with %s", err)
 				fsa.Input <- block
 				return
 			}
-
-			defer func(ioc io.Closer) {
-				if err := ioc.Close(); err != nil {
-					log.Printf("closing file failed with %s", err)
-				}
-			}(toFile)
-
-			ocfWriter, err := goavro.NewOCFWriter(goavro.OCFConfig{
-				W:               toFile,
-				CompressionName: fsa.CompressionName,
-				Schema:          fsa.Codec.Schema(),
-			})
-
-			err = ocfWriter.Append(block.Rows)
 		}
 	}()
 }
@@ -160,7 +171,6 @@ func (fsa *FilesystemStorageAdapter) Start() (err error) {
 
 func (fsa *FilesystemStorageAdapter) Stop() (err error) {
 	log.Println("FilesystemStorageAdapter stopping")
-	close(fsa.Input)
 
 	// wait for completion
 	ttl := 100
@@ -176,5 +186,4 @@ func (fsa *FilesystemStorageAdapter) Stop() (err error) {
 	}
 
 	return
-
 }

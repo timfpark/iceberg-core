@@ -32,6 +32,7 @@ func TestFilesystemStorageAdapterWrite(t *testing.T) {
 	block.Write(native)
 
 	input <- block
+	close(input)
 
 	filesystemStorageAdapter.Stop()
 
