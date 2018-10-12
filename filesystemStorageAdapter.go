@@ -47,14 +47,14 @@ func (fsa *FilesystemStorageAdapter) processBlocks() {
 
 			toFile, err := os.Create(blockFilePath)
 			if err != nil {
-				fmt.Printf("creating file failed with %s", err)
+				log.Printf("creating file failed with %s", err)
 				fsa.Input <- block
 				return
 			}
 
 			defer func(ioc io.Closer) {
 				if err := ioc.Close(); err != nil {
-					fmt.Printf("closing file failed with %s", err)
+					log.Printf("closing file failed with %s", err)
 				}
 			}(toFile)
 

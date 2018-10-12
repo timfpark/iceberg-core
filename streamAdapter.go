@@ -2,6 +2,7 @@ package core
 
 import (
 	"io"
+	"log"
 
 	goavro "gopkg.in/linkedin/goavro.v2"
 )
@@ -14,6 +15,7 @@ type StreamAdapter interface {
 func ReadOCFIntoChannel(reader io.Reader, output chan interface{}, errors chan error) {
 	ocf, err := goavro.NewOCFReader(reader)
 	if err != nil {
+		log.Printf("NewOCFReader error: %s\n", err)
 		errors <- err
 		close(output)
 		return
@@ -23,12 +25,15 @@ func ReadOCFIntoChannel(reader io.Reader, output chan interface{}, errors chan e
 		for ocf.Scan() {
 			native, err := ocf.Read()
 			if err != nil {
+				log.Printf("Read error: %s\n", err)
 				errors <- err
 				break
 			}
 
 			output <- native
 		}
+
+		log.Printf("Input finished\n")
 
 		close(output)
 	}(ocf)

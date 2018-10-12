@@ -1,7 +1,7 @@
 package core
 
 type StorageAdapter interface {
-	Query(partition interface{}, startKey interface{}, endKey interface{}) []interface{}
+	Query(partitionKey string, startKey interface{}, endKey interface{}) (results []interface{}, err error)
 
 	Start() (err error)
 	Stop() (err error)

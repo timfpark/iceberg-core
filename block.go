@@ -95,7 +95,6 @@ func (b *Block) GetHashForRows() (blockBinary []byte) {
 	blockBinary = []byte{}
 	h := sha1.New()
 	for _, row := range b.Rows {
-		fmt.Printf("%+v\n", row)
 		rowBinary, err := b.Codec.BinaryFromNative(nil, row)
 		if err != nil {
 			fmt.Printf("GetRowsAsBinary: %s\n", err)

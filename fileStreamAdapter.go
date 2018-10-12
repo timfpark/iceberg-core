@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	goavro "gopkg.in/linkedin/goavro.v2"
@@ -40,7 +41,8 @@ func (fsa *FileStreamAdapter) removeTypeMaps(native interface{}) (flattened map[
 func (fsa *FileStreamAdapter) Start() (err error) {
 	file, err := os.Open(fsa.FilePath)
 	if err != nil {
-		return
+		log.Printf("FileStreamAdapter.Start failed with %s\n", err)
+		return err
 	}
 
 	ReadOCFIntoChannel(file, fsa.Output, fsa.Errors)
