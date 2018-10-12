@@ -4,15 +4,13 @@ import (
 	"log"
 	"testing"
 	"time"
-
-	core "github.com/timfpark/iceberg-core"
 )
 
 func TestBlockManager(t *testing.T) {
 	log.Println("Starting TestBlockManager")
 
 	input := make(chan interface{})
-	output := make(chan *core.Block)
+	output := make(chan *Block)
 
 	native := GetNativeFixture()
 
